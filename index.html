@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BLE Beacon Based Indoor Location Tracking System - Simulation</title>
+  <link rel="stylesheet" href="css/style.css" onerror="this.onerror=null;this.href='style.css'">
+</head>
+<body>
+
+  <!-- ===================== Top bar ===================== -->
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-icon" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="3.2" fill="currentColor"/>
+        <path d="M9.5 9.5a9.2 9.2 0 0 0 0 13M22.5 9.5a9.2 9.2 0 0 1 0 13M5.6 5.6a14.7 14.7 0 0 0 0 20.8M26.4 5.6a14.7 14.7 0 0 1 0 20.8"
+              fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <h1>BLE Beacon Based Indoor Location Tracking</h1>
+        <p>Cinematic 3D digital twin: simulated RSSI, path loss and trilateration</p>
+      </div>
+    </div>
+    <div class="sim-badge" title="No Bluetooth hardware is used in this project.">
+      <span class="sim-dot"></span>
+      Simulated data. Not real Bluetooth measurements.
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <!-- ===================== 3D viewport ===================== -->
+    <section class="viewport" id="viewport">
+      <div id="canvas-host"></div>
+
+      <div class="overlay top-left legend" aria-label="Legend">
+        <span><i class="swatch ring-yellow"></i>True position</span>
+        <span><i class="swatch ring-pink"></i>Estimated position</span>
+        <span><i class="swatch line-yellow"></i>True trail</span>
+        <span><i class="swatch line-pink"></i>Estimated trail</span>
+        <span><i class="swatch dot-multi"></i>Beacons B1 B2 B3</span>
+      </div>
+
+      <div class="overlay top-right">
+        <div class="seg dock" role="group" aria-label="Camera shots">
+          <button data-shot="overview" class="active" type="button" title="Wide architectural aerial view">Overview</button>
+          <button data-shot="top" type="button" title="Top-down floor plan">Plan</button>
+          <button data-shot="orbit" type="button" title="Slow orbit around the building">Orbit</button>
+          <button data-shot="indoor" type="button" title="Cutaway view of the room the person is in">Indoor</button>
+          <button data-shot="corridor" type="button" title="Eye-level dolly down the corridor">Corridor</button>
+          <button data-shot="beacons" type="button" title="Close-ups of beacons B1, B2, B3">Beacons</button>
+          <button data-shot="follow" type="button" title="Camera follows the walking person">Follow</button>
+        </div>
+        <div class="dock-row">
+          <button data-shot="tour" class="btn small tour" type="button" title="Automatic cinematic camera sequence">&#9654; Cinematic tour</button>
+          <button id="cam-reset" class="btn small" type="button" title="Return to the home pose of the current shot">Reset camera</button>
+        </div>
+      </div>
+
+      <div class="caption" id="caption" aria-live="polite">
+        <div class="cap-title" id="cap-title"></div>
+        <div class="cap-sub" id="cap-sub"></div>
+      </div>
+      <div class="toast" id="toast" role="status"></div>
+
+      <div class="overlay bottom-left" id="view-hint">Drag to orbit. Scroll to zoom. Right-drag to pan.</div>
+      <div class="overlay bottom-mid fps-chip" id="fps-chip" title="Rendering speed">-- fps</div>
+      <div class="overlay bottom-right disclaimer-chip">All RSSI values come from a mathematical model</div>
+    </section>
+
+    <!-- ===================== Dashboard ===================== -->
+    <aside class="sidebar">
+
+      <!-- Simulation controls -->
+      <section class="card">
+        <div class="card-head">
+          <h2>Simulation controls</h2>
+          <span id="status-pill" class="pill idle">Ready</span>
+        </div>
+
+        <div class="btn-row">
+          <button id="btn-start" class="btn primary" type="button">Start</button>
+          <button id="btn-pause" class="btn" type="button" disabled>Pause</button>
+          <button id="btn-reset" class="btn" type="button">Reset</button>
+        </div>
+
+        <div class="field tight">
+          <label for="sel-path">Test path</label>
+          <select id="sel-path"></select>
+        </div>
+
+        <div class="row-label">Movement</div>
+        <div class="seg wide" role="group" aria-label="Movement mode">
+          <button id="mode-auto" class="active" type="button">Automatic walk</button>
+          <button id="mode-manual" type="button">Manual movement</button>
+        </div>
+
+        <div id="manual-box" class="manual-box" hidden>
+          <div class="dpad" aria-label="Movement buttons">
+            <button type="button" data-dir="up"    class="d-up"    aria-label="Move up">&#9650;</button>
+            <button type="button" data-dir="left"  class="d-left"  aria-label="Move left">&#9664;</button>
+            <button type="button" data-dir="down"  class="d-down"  aria-label="Move down">&#9660;</button>
+            <button type="button" data-dir="right" class="d-right" aria-label="Move right">&#9654;</button>
+          </div>
+          <p class="hint">Press Start, then use the buttons or the keys W A S D / arrow keys. Walls block the receiver.</p>
+        </div>
+      </section>
+
+      <!-- RSSI of the three beacons (rows are created by dashboard.js) -->
+      <section class="card">
+        <div class="card-head">
+          <h2>Received signal strength (RSSI)</h2>
+          <span class="tag">simulated</span>
+        </div>
+        <div id="beacon-rows" class="beacon-rows"></div>
+      </section>
+
+      <!-- Position estimate -->
+      <section class="card">
+        <div class="card-head">
+          <h2>Location estimate</h2>
+          <span class="tag">simulated</span>
+        </div>
+        <div class="stat-grid">
+          <div class="stat"><span class="k">Estimated X</span><span class="v" id="st-estx">-</span></div>
+          <div class="stat"><span class="k">Estimated Z</span><span class="v" id="st-estz">-</span></div>
+          <div class="stat"><span class="k">True X</span><span class="v dim" id="st-truex">-</span></div>
+          <div class="stat"><span class="k">True Z</span><span class="v dim" id="st-truez">-</span></div>
+          <div class="stat"><span class="k">Position error</span><span class="v" id="st-err">-</span></div>
+          <div class="stat"><span class="k">Nearest beacon</span><span class="v" id="st-nearest">-</span></div>
+          <div class="stat wide"><span class="k">Estimated room</span><span class="v" id="st-roomest">-</span></div>
+          <div class="stat wide"><span class="k">Actual room</span><span class="v dim" id="st-roomtrue">-</span></div>
+        </div>
+        <div class="stat-grid small">
+          <div class="stat"><span class="k">Scans</span><span class="v" id="st-samples">0</span></div>
+          <div class="stat"><span class="k">Mean error</span><span class="v" id="st-meanerr">-</span></div>
+          <div class="stat"><span class="k">Room accuracy</span><span class="v" id="st-roomacc">-</span></div>
+        </div>
+      </section>
+
+      <!-- Parameters -->
+      <section class="card">
+        <div class="card-head"><h2>Signal and algorithm settings</h2></div>
+
+        <div class="slider">
+          <div class="slider-head"><label for="sl-noise">Signal noise (sigma)</label><output id="out-noise"></output></div>
+          <input type="range" id="sl-noise" data-param="noiseStd" data-unit=" dB" data-decimals="1" min="0" max="10" step="0.5">
+          <p class="slider-help">Standard deviation of the random fading noise added to every RSSI reading.</p>
+        </div>
+
+        <div class="slider">
+          <div class="slider-head"><label for="sl-tx">Beacon transmission power (RSSI at 1 m)</label><output id="out-tx"></output></div>
+          <input type="range" id="sl-tx" data-param="txPower" data-unit=" dBm" data-decimals="0" min="-80" max="-40" step="1">
+          <p class="slider-help">Higher power means stronger RSSI everywhere and a larger signal range (see the rings).</p>
+        </div>
+
+        <div class="slider">
+          <div class="slider-head"><label for="sl-n">Path-loss exponent (n)</label><output id="out-n"></output></div>
+          <input type="range" id="sl-n" data-param="pathLossExp" data-unit="" data-decimals="1" min="1.5" max="4" step="0.1">
+          <p class="slider-help">2.0 is free space. Indoors with walls and furniture it is typically 2 to 4.</p>
+        </div>
+
+        <div class="slider">
+          <div class="slider-head"><label for="sl-alpha">RSSI smoothing factor (alpha)</label><output id="out-alpha"></output></div>
+          <input type="range" id="sl-alpha" data-param="smoothing" data-unit="" data-decimals="2" min="0.05" max="1" step="0.05">
+          <p class="slider-help">1.00 uses raw readings. Smaller values average over more scans (smoother, but slower to react).</p>
+        </div>
+
+        <div class="slider">
+          <div class="slider-head"><label for="sl-speed">Walking speed</label><output id="out-speed"></output></div>
+          <input type="range" id="sl-speed" data-param="speed" data-unit=" m/s" data-decimals="1" min="0.5" max="3" step="0.1">
+        </div>
+
+        <div class="field">
+          <label for="sel-algo">Positioning algorithm</label>
+          <select id="sel-algo">
+            <option value="gauss-newton">Trilateration + Gauss-Newton refinement</option>
+            <option value="linear">Trilateration (linear least squares)</option>
+            <option value="centroid">Weighted centroid</option>
+          </select>
+          <p class="slider-help" id="algo-desc"></p>
+        </div>
+
+        <div class="toggles">
+          <label><input type="checkbox" data-option="showRings" checked> Signal rings</label>
+          <label><input type="checkbox" data-option="showCircles" checked> Estimated-distance circles</label>
+          <label><input type="checkbox" data-option="showLines" checked> Link lines</label>
+          <label><input type="checkbox" data-option="showTrail" checked> History trails</label>
+          <label><input type="checkbox" data-option="showCoverage" checked> Coverage glow</label>
+          <label><input type="checkbox" data-option="showLabels" checked> 3D labels</label>
+          <label><input type="checkbox" data-option="showScatter" checked> Noise cloud (raw estimates)</label>
+          <label><input type="checkbox" data-option="showEffects" checked> Handoff effects</label>
+          <label><input type="checkbox" data-option="lowWalls"> Low walls (cutaway)</label>
+        </div>
+
+        <div class="field">
+          <label for="sel-quality">Render quality</label>
+          <select id="sel-quality">
+            <option value="auto" selected>Auto (adapts to your laptop)</option>
+            <option value="high">High</option>
+            <option value="balanced">Balanced</option>
+            <option value="low">Low (no shadows)</option>
+          </select>
+        </div>
+      </section>
+
+      <!-- Live floor plan and RSSI history -->
+      <section class="card">
+        <div class="card-head"><h2>Live floor plan</h2></div>
+        <canvas id="minimap" class="minimap"></canvas>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>RSSI history (last 20 s)</h2></div>
+        <canvas id="rssi-chart" class="chart"></canvas>
+      </section>
+
+      <!-- Explanation -->
+      <section class="card">
+        <div class="card-head"><h2>How the simulation works</h2></div>
+        <div class="theory">
+          <details open>
+            <summary>1. Simulating RSSI (path-loss model)</summary>
+            <p>Signal strength falls with distance. For every beacon the simulator computes</p>
+            <pre>RSSI = P0 - 10 * n * log10(d) + X</pre>
+            <p><b>P0</b> is the power at 1 m (transmission power slider), <b>n</b> the path-loss exponent, <b>d</b> the distance in metres, and <b>X</b> a random Gaussian noise term with standard deviation sigma (noise slider). Values are rounded to whole dBm, like a phone reports them.</p>
+          </details>
+          <details>
+            <summary>2. RSSI to distance</summary>
+            <p>The receiver does not know the true distance. It inverts the model:</p>
+            <pre>d = 10 ^ ((P0 - RSSI) / (10 * n))</pre>
+            <p>Readings are first smoothed with an exponential moving average, <code>filtered = alpha * new + (1 - alpha) * old</code>, because single BLE readings jump a lot. The beacons hang 2.3 m high and the phone is at 1.2 m, so the horizontal distance is <code>sqrt(d^2 - 1.1^2)</code>.</p>
+          </details>
+          <details>
+            <summary>3. Position estimate (trilateration)</summary>
+            <p>Each beacon i gives a circle <code>(x - xi)^2 + (z - zi)^2 = di^2</code> around itself. The receiver should be where the three circles meet. Subtracting the last circle equation from the other two removes the squared terms and leaves two linear equations in x and z, which are solved by least squares.</p>
+            <p>Because every distance has an error, the circles do not meet in exactly one point. That gap is the position error you see on the dashboard. The default setting starts from this linear solution and then applies a few <b>Gauss-Newton</b> steps that minimise the weighted range error (far beacons, which are noisier, count less). You can also switch to the plain linear solution or to a <b>weighted centroid</b> (average of the beacon positions, nearer beacons count more) and compare the errors.</p>
+          </details>
+          <details>
+            <summary>4. Nearest beacon, handoff and room</summary>
+            <p>The nearest beacon is the one with the strongest filtered RSSI. When it changes (and stays changed for three scans), the 3D view plays a handoff pulse. The pink dots near the estimate marker are the unfiltered per-scan estimates, so their spread shows the measurement noise. The estimated room is the room rectangle that contains the estimated (x, z) point.</p>
+          </details>
+          <details>
+            <summary>5. Simulation versus real BLE hardware</summary>
+            <p>Real RSSI is also affected by multipath reflections, body shadowing, walls, phone orientation, antenna differences and 2.4 GHz interference. This simulation uses one noise model and ignores walls for the signal, so it shows the principle but not the exact accuracy of a real deployment. Validating the model needs real measurements, for example with ESP32 or nRF52 beacons and a phone scanner app.</p>
+          </details>
+        </div>
+      </section>
+
+      <section class="card notice">
+        <h2>Simulation notice</h2>
+        <p>Every RSSI value, distance and position shown here is generated by software. No Bluetooth adapter, beacon or phone is read. Do not present these numbers as measurements from real hardware.</p>
+      </section>
+
+    </aside>
+  </main>
+
+  <!--
+    Script loader. Scripts are plain classic scripts (no ES modules), so this page also works when it is
+    opened by double-click (file://). Every file is looked for in the normal folder layout first
+    (js/..., js/lib/...) and then next to index.html, so a flat copy of the project works too.
+    Three.js falls back to a CDN. If anything is still missing, a visible message names the files.
+  -->
+  <script>
+  (function () {
+    'use strict';
+    var CDN = 'https://cdn.jsdelivr.net/npm/three@0.147.0/';
+    var LIB = ['js/lib/', 'lib/', ''], JS = ['js/', ''];
+    var queue = [
+      { f: 'three.min.js',     dirs: LIB, cdn: CDN + 'build/three.min.js', ok: function () { return !!window.THREE; } },
+      { f: 'OrbitControls.js', dirs: LIB, cdn: CDN + 'examples/js/controls/OrbitControls.js', ok: function () { return !!(window.THREE && THREE.OrbitControls); } },
+      { f: 'config.js',    dirs: JS }, { f: 'ble-model.js', dirs: JS }, { f: 'scene.js', dirs: JS },
+      { f: 'dashboard.js', dirs: JS }, { f: 'main.js',      dirs: JS }
+    ];
+
+    function loadScript(src) {
+      return new Promise(function (resolve) {
+        var el = document.createElement('script');
+        el.src = src; el.async = false;
+        el.onload = function () { resolve(true); };
+        el.onerror = function () { el.remove(); resolve(false); };
+        document.body.appendChild(el);
+      });
+    }
+    function loadItem(item) {
+      var urls = item.dirs.map(function (d) { return d + item.f; });
+      if (item.cdn) urls.push(item.cdn);
+      var i = 0;
+      return (function next() {
+        if (i >= urls.length) return Promise.resolve(false);
+        return loadScript(urls[i++]).then(function (loaded) {
+          return (loaded && (!item.ok || item.ok())) ? true : next();
+        });
+      })();
+    }
+    function report(missing, skipped, cssMissing) {
+      var box = document.createElement('div');
+      box.id = 'load-problem';
+      box.setAttribute('style', 'position:fixed;z-index:99999;left:12px;right:12px;top:12px;padding:14px 18px;border-radius:10px;' +
+        'background:#3b1219;color:#fecaca;border:1px solid #ef4444;font:14px/1.5 system-ui,Segoe UI,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.5)');
+      var lines = [];
+      if (missing.length) lines.push('Could not load: ' + missing.join(', ') + (skipped.length ? ' (so ' + skipped.join(', ') + ' were not started)' : '') + '.');
+      if (cssMissing) lines.push('The stylesheet (style.css) could not be loaded.');
+      lines.push('Keep the folder structure: index.html, css/style.css, js/*.js and js/lib/*.js (or put every file next to index.html).');
+      lines.push('Then run  python -m http.server 8000  inside that folder and open http://localhost:8000');
+      lines.forEach(function (t, k) { var p = document.createElement('div'); p.textContent = t; if (k === 0) p.style.fontWeight = '700'; box.appendChild(p); });
+      document.body.appendChild(box);
+    }
+
+    var missing = [], skipped = [];
+    queue.reduce(function (chain, item) {
+      return chain.then(function (stop) {
+        if (stop) { skipped.push(item.f); return true; }          // earlier file failed: later ones cannot work
+        return loadItem(item).then(function (ok) { if (!ok) missing.push(item.f); return !ok; });
+      });
+    }, Promise.resolve(false)).then(function () {
+      var cssOk = !!getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+      if (missing.length || !cssOk) report(missing, skipped, !cssOk);
+    });
+  })();
+  </script>
+</body>
+</html>
